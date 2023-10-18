@@ -1,6 +1,8 @@
-import {Entity, PrimaryGeneratedColumn, Column, BeforeInsert, BeforeUpdate} from 'typeorm';
+import {Entity, PrimaryGeneratedColumn, Column, BeforeInsert, BeforeUpdate, OneToMany, ManyToOne} from 'typeorm';
+import { ProductImage } from './product-image.entity';
+import { User } from 'src/auth/entities/user.entity';
 
-@Entity()
+@Entity({name: 'products'})
 export class Product {
 
     @PrimaryGeneratedColumn('uuid')
@@ -47,7 +49,23 @@ export class Product {
         default: []
     })
     tags: string[]
+
+    @OneToMany(
+        ()=> ProductImage, 
+        (productImage)=> productImage.product,{
+            cascade: true,
+            eager: true
+        }
+    )
+    images?: ProductImage[];
     //images
+
+    @ManyToOne(
+        ()=>User,
+        (user) => user.product,
+        {eager: true}
+    )
+    user:User;
 
     @BeforeInsert()//balidar antes de guardar que el before este asi
     checkSlugInsert(){

@@ -3,10 +3,12 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { Product } from './entities/product.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 import {validate as isUUID} from 'uuid'
 import { NotFoundError } from 'rxjs';
+import { ProductImage } from './entities/product-image.entity';
+import { User } from 'src/auth/entities/user.entity';
 
 @Injectable()
 export class ProductsService {
@@ -15,10 +17,14 @@ export class ProductsService {
 
   constructor(
      @InjectRepository(Product)
-     private readonly productRepository: Repository<Product>
+     private readonly productRepository: Repository<Product>,
+     @InjectRepository(ProductImage)
+     private readonly productImagesRepository: Repository<ProductImage>,
+
+     private readonly dataSource: DataSource, /// sabe que las credenciales de la DB
   ){}
 
-  async create(createProductDto: CreateProductDto) {
+  async create(createProductDto: CreateProductDto, user: User) {
 
     try {
 
@@ -28,11 +34,16 @@ export class ProductsService {
       //   createProductDto.slug = createProductDto.slug.toLowerCase().replaceAll(' ','_').replaceAll("'",'')
 
       // }
+      const { images= [], ...productDetails} = createProductDto
       
-      const product = this.productRepository.create(createProductDto)
+      const product = this.productRepository.create({
+        ...productDetails,
+        images: images.map( image => this.productImagesRepository.create({url:image})),
+        user,
+      })
       await this.productRepository.save(product);
 
-      return product; 
+      return {...product, images}; 
 
 
     } catch (error) {
@@ -43,10 +54,18 @@ export class ProductsService {
 
   async findAll(paginationDto:PaginationDto) {
     const {limit= 10, offset=0} = paginationDto
-    return await this.productRepository.find({
+    const product =  await this.productRepository.find({
       take: limit,
-      skip: offset
+      skip: offset,
+      relations:{
+        images: true
+      }
     });
+
+    return product.map(product => ({
+      ...product,
+      images: product.images.map(img=> img.url)
+    }))
   }
 
   async findOne(term: string) {
@@ -67,19 +86,42 @@ export class ProductsService {
     return await this.productRepository.findOneBy({ id: term });
 }
 
-  async update(id: string, updateProductDto: UpdateProductDto) {
+  async update(id: string, updateProductDto: UpdateProductDto, user: User) {
+
+    const {images , ...toUpdate } = updateProductDto;
+
     const product= await this.productRepository.preload({
       id:id,
-      ...updateProductDto
+      ...toUpdate
     })
     if(!product){
       throw new NotFoundException('Producto no encotrado')
     }
 
+    // create queryrunner
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    
     try {
-      return this.productRepository.save(product) ;
+      if(images){
+        await queryRunner.manager.delete(ProductImage, {product: {id}} )
+
+        product.images = images.map(image=> this.productImagesRepository.create({url:image}))
+      }else{
+        product.images = await this.productImagesRepository.findBy({product:{id}})
+      }
+      await queryRunner.manager.save(product) //no impacta a la BD hasta que se haga el commit puede que falle
+
+      product.user= user
+      await queryRunner.commitTransaction(); // hasta aqui esta todo bien, entyopnces almacena todo
+      await queryRunner.release(); //con esto ya se desconecta a la BD
+      return product ;
       
     } catch (error) {
+      await queryRunner.rollbackTransaction()//si sale algun error hace rollback
+
       this.handleExceptionms(error) 
     }
   }
@@ -99,5 +141,16 @@ export class ProductsService {
 
     this.logger.error(error)
     throw new InternalServerErrorException('Algo salio mal en crear producto')
+  }
+
+  async deleteAllProducts(){
+    const query = this.productRepository.createQueryBuilder('product');
+
+    try {
+      return await query.delete().where({}).execute()
+    } catch (error) {
+      console.log('error: ', error);
+      
+    }
   }
 }
