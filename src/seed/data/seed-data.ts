@@ -36,14 +36,14 @@ export const initialData: SeedData = {
     users: [
         {
             email: 'test1@gmail.com',
-            fullName: 'Jefer2123',
+            fullName: 'Usuario1',
             password: bcrypt.hashSync('Ad1d111a', 10),
             roles: ['admin', 'user']
         },
         {
             email: 'test12@gmail.com',
-            fullName: 'Jefe2r2123',
-            password: bcrypt.hashSync('Ad111da111', 10),
+            fullName: 'Usuario2',
+            password: bcrypt.hashSync('Ad1d111a', 10),
             roles: ['admin']
         },
     ],
